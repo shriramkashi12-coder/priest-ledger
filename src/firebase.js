@@ -3,12 +3,12 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: "AIzaSyCe3Bd-bK-m6aFdtAUFnKSakNdnBqNuX6A",
+  authDomain: "priest-library-app-22e8f.firebaseapp.com",
+  projectId: "priest-library-app-22e8f",
+  storageBucket: "priest-library-app-22e8f.firebasestorage.app",
+  messagingSenderId: "1021784741300",
+  appId: "1:1021784741300:web:571538930535a827e14ee1"
 };
 
 const app = initializeApp(firebaseConfig);
