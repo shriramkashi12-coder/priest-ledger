@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, increment } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, increment, query, orderBy, limit } from 'firebase/firestore';
 import { LogOut } from 'lucide-react';
 import PinScreen from './PinScreen';
 
@@ -96,6 +96,7 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState('ALL');
   const [filterMode, setFilterMode] = useState('ALL');
   const [pendingFilter, setPendingFilter] = useState('STILL_PENDING');
+  const [txnLimit, setTxnLimit] = useState(100); // Only load 100 items by default
 
   // Modal & Security
   const [activeModalTxn, setActiveModalTxn] = useState(null);
@@ -142,7 +143,14 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    const qTxn = collection(db, `users/${user.uid}/transactions`);
+    
+    // THE QUOTA SHIELD: Query with ordering and limit
+    const qTxn = query(
+      collection(db, `users/${user.uid}/transactions`), 
+      orderBy('date', 'desc'), 
+      limit(txnLimit)
+    );
+    
     const unsubTxn = onSnapshot(qTxn, (snapshot) => {
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
@@ -159,7 +167,7 @@ export default function App() {
     });
 
     return () => { unsubTxn(); unsubCat(); unsubLedgers(); };
-  }, [user, lang]);
+  }, [user, lang, txnLimit]);
 
   // --- AUTO-MIGRATION & SUMMARY LISTENER ---
   useEffect(() => {
@@ -654,6 +662,20 @@ export default function App() {
              );
           })
         )}
+
+        {/* --- LOAD MORE BUTTON --- */}
+        {filteredTransactions.length >= txnLimit && (
+          <div style={{ textAlign: 'center', marginTop: '20px', paddingBottom: '30px' }}>
+            <button 
+              onClick={() => setTxnLimit(prev => prev + 100)} 
+              className="btn-cancel" 
+              style={{ padding: '10px 20px', background: '#222', color: '#00e5ff', border: '1px solid rgba(0,229,255,0.3)' }}
+            >
+              ⬇ Load Older Transactions ⬇
+            </button>
+          </div>
+        )}
+
       </div>
     </>
   );
