@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, increment } from 'firebase/firestore';
 import { LogOut } from 'lucide-react';
 import PinScreen from './PinScreen';
 
@@ -48,7 +48,6 @@ const incomeCategories = ["Poojai", "Homam", "Purvam", "Aparam", "Laukikam", "Ot
 const expenseCategories = ["Travel", "Pooja Materials", "Dakshina Given", "Food/Meals", "Other Expense"];
 const categoryIcons = { "Aparam": "🔥", "Homam": "🕉️", "Purvam": "✨", "Poojai": "🙏", "Laukikam": "💼", "Other Income": "💰", "Travel": "🚕", "Pooja Materials": "🌺", "Dakshina Given": "💸", "Food/Meals": "🍛", "Other Expense": "🧾" };
 
-// --- CUSTOM DATE FORMATTER ---
 const formatCustomDate = (dateStr, langCode) => {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -59,7 +58,6 @@ const formatCustomDate = (dateStr, langCode) => {
   return `${day} / ${month} / ${year}`;
 };
 
-// --- SAFE RECURRING MATH FIX ---
 const calculateNextMonthDate = (dateString) => {
   const d = new Date(dateString);
   const month = d.getMonth();
@@ -99,41 +97,31 @@ export default function App() {
   const [filterMode, setFilterMode] = useState('ALL');
   const [pendingFilter, setPendingFilter] = useState('STILL_PENDING');
 
-  // Modal State
+  // Modal & Security
   const [activeModalTxn, setActiveModalTxn] = useState(null);
-
-  // --- PIN SYSTEM STATE ---
   const [isLocked, setIsLocked] = useState(true);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  // --- SUMMARY CLOUD ENGINE STATE ---
+  const [activeSummary, setActiveSummary] = useState({ income: 0, expense: 0, pending: 0, planned: 0 });
 
   const handleForgotPin = async () => {
     if (navigator.onLine) {
-      if (user && user.uid) {
-        localStorage.removeItem(`appPin_${user.uid}`);
-      }
+      if (user && user.uid) { localStorage.removeItem(`appPin_${user.uid}`); }
       setIsLocked(true);
       await logOut(); 
     } else {
       alert("You must be connected to the internet to reset your PIN.");
     }
   };
-  // --------------------------------
-
-  // --- NETWORK STATE ---
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   useEffect(() => {
     const handleOffline = () => setIsOffline(true);
     const handleOnline = () => setIsOffline(false);
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
   }, []);
-  // ---------------------
 
   const t = (key) => dict[lang][key];
   const cT = (name) => (lang === 'ta' && catTranslate[name]) ? catTranslate[name] : name;
@@ -144,9 +132,7 @@ export default function App() {
       setUser(currentUser);
       if (currentUser) {
         await setDoc(doc(db, 'users', currentUser.uid), {
-          email: currentUser.email,
-          name: currentUser.displayName,
-          lastActive: new Date().toISOString()
+          email: currentUser.email, name: currentUser.displayName, lastActive: new Date().toISOString()
         }, { merge: true });
       }
       setLoading(false);
@@ -156,7 +142,6 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    
     const qTxn = collection(db, `users/${user.uid}/transactions`);
     const unsubTxn = onSnapshot(qTxn, (snapshot) => {
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -176,23 +161,44 @@ export default function App() {
     return () => { unsubTxn(); unsubCat(); unsubLedgers(); };
   }, [user, lang]);
 
-  // --- MASTER ARCHIVE EXPORT (COMPLETE PDF FIX) ---
+  // --- AUTO-MIGRATION & SUMMARY LISTENER ---
+  useEffect(() => {
+    if (!user || !activeTripId) return;
+    const summaryRef = doc(db, `users/${user.uid}/summaries`, activeTripId);
+    
+    const unsub = onSnapshot(summaryRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        setActiveSummary({ income: 0, expense: 0, pending: 0, planned: 0, ...docSnap.data() });
+      } else {
+        // Auto-Migration: If no cloud summary exists, build it from the local data
+        if (transactions.length > 0) {
+          const tripTxns = transactions.filter(t => t.tripId === activeTripId);
+          let sums = { income: 0, expense: 0, pending: 0, planned: 0 };
+          tripTxns.forEach(t => { if (sums[t.type] !== undefined) sums[t.type] += t.amount; });
+          await setDoc(summaryRef, sums);
+        }
+      }
+    });
+    return () => unsub();
+  }, [user, activeTripId, transactions.length]);
+
+  // --- SUMMARY INCREMENT HELPER ---
+  const updateSummary = async (tripId, type, amountChange) => {
+    if (amountChange === 0 || !tripId) return;
+    const summaryRef = doc(db, `users/${user.uid}/summaries`, tripId);
+    await setDoc(summaryRef, { [type]: increment(amountChange) }, { merge: true });
+  };
+
+  // --- MASTER ARCHIVE EXPORT ---
   const downloadMasterPDF = () => {
     if (!transactions.length) return alert(t('txtNoRecords'));
-    
     const doc = new jsPDF();
     const currentYear = new Date().getFullYear();
     let currentY = 35;
 
-    // 1. Master Title Page
-    doc.setFontSize(22);
-    doc.setTextColor(40, 40, 40);
-    doc.text(`Complete Ledger Archive - ${currentYear}`, 14, 22);
-    doc.setFontSize(11);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}`, 14, 28);
+    doc.setFontSize(22); doc.setTextColor(40, 40, 40); doc.text(`Complete Ledger Archive - ${currentYear}`, 14, 22);
+    doc.setFontSize(11); doc.setTextColor(100, 100, 100); doc.text(`Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}`, 14, 28);
 
-    // 2. Define Section Logic
     const sections = [
       { id: 'income', title: 'Direct Income', filter: t => t.type === 'income' && !t.isRecovered, color: [46, 204, 113] },
       { id: 'recovered', title: 'Recovered Dues', filter: t => t.type === 'income' && t.isRecovered, color: [39, 174, 96] },
@@ -201,75 +207,36 @@ export default function App() {
       { id: 'planned', title: 'Planned Expenses', filter: t => t.type === 'planned', color: [0, 229, 255] }
     ];
 
-    // 3. Loop through EVERY Ledger
     trips.forEach((trip) => {
       const tripTxns = transactions.filter(t => t.tripId === trip.id);
-      if (tripTxns.length === 0) return; // Skip completely empty ledgers
+      if (tripTxns.length === 0) return; 
 
-      // Page break check before starting a new ledger
       if (currentY > 250) { doc.addPage(); currentY = 20; }
+      doc.setFontSize(16); doc.setTextColor(237, 94, 33); doc.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
 
-      // Ledger Header
-      doc.setFontSize(16);
-      doc.setTextColor(237, 94, 33); // App Orange
-      doc.text(`Ledger: ${trip.name}`, 14, currentY);
-      currentY += 10;
-
-      // Loop through the 5 logical sections for this ledger
       sections.forEach(sec => {
         const sectionTxns = tripTxns.filter(sec.filter).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        
-        if (sectionTxns.length === 0) return; // Skip section if no data
+        if (sectionTxns.length === 0) return; 
 
-        // Calculate section total
         const sectionTotal = sectionTxns.reduce((acc, curr) => acc + curr.amount, 0);
+        const tableRows = sectionTxns.map(txn => [ formatCustomDate(txn.date, 'en'), txn.category, txn.paymentMode, txn.details || '-', `Rs. ${txn.amount.toLocaleString('en-IN')}` ]);
 
-        // Map data for the table
-        const tableRows = sectionTxns.map(txn => [
-          formatCustomDate(txn.date, 'en'),
-          txn.category,
-          txn.paymentMode,
-          txn.details || '-',
-          `Rs. ${txn.amount.toLocaleString('en-IN')}`
-        ]);
-
-        // Draw Table
         autoTable(doc, {
-          startY: currentY,
-          head: [[`${sec.title}`, 'Category', 'Mode', 'Details', 'Amount']],
-          body: tableRows,
-          foot: [['', '', '', 'Total:', `Rs. ${sectionTotal.toLocaleString('en-IN')}`]],
-          theme: 'grid',
-          headStyles: { fillColor: sec.color, textColor: [255,255,255] },
-          footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
-          styles: { fontSize: 9, cellPadding: 3 },
-          columnStyles: {
-            0: { cellWidth: 28 }, // Date
-            4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } // Amount
-          }
+          startY: currentY, head: [[`${sec.title}`, 'Category', 'Mode', 'Details', 'Amount']], body: tableRows,
+          foot: [['', '', '', 'Total:', `Rs. ${sectionTotal.toLocaleString('en-IN')}`]], theme: 'grid',
+          headStyles: { fillColor: sec.color, textColor: [255,255,255] }, footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+          styles: { fontSize: 9, cellPadding: 3 }, columnStyles: { 0: { cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } }
         });
-
-        // Update Y position to start the next section perfectly below this one
         currentY = doc.lastAutoTable.finalY + 12;
       });
-
-      // Add a visual separator between Ledgers
-      currentY += 5;
-      doc.setDrawColor(200);
-      doc.line(14, currentY, 196, currentY);
-      currentY += 15;
+      currentY += 5; doc.setDrawColor(200); doc.line(14, currentY, 196, currentY); currentY += 15;
     });
-
-    // Save File
     doc.save(`Complete_Ledger_Archive_${currentYear}.pdf`);
   };
 
-  // --- FINANCIAL YEAR END NOTIFICATION LOGIC ---
   const todayDate = new Date();
-  const currentMonth = todayDate.getMonth(); // NOTE: 0 is Jan, 1 is Feb, 2 is March!
+  const currentMonth = todayDate.getMonth();
   const currentDay = todayDate.getDate();
-  
-  // Triggers ONLY if the month is March (2) AND the day is between the 15th and 31st
   const showYearEndWarning = (currentMonth === 2 && currentDay >= 15 && currentDay <= 31); 
 
   // --- DERIVED DATA FOR UI VIEWS ---
@@ -293,16 +260,20 @@ export default function App() {
   let filteredTransactions = contextTransactions;
   if (filterCategory !== 'ALL') filteredTransactions = filteredTransactions.filter(e => e.category === filterCategory);
   if (filterMode !== 'ALL') filteredTransactions = filteredTransactions.filter(e => e.paymentMode === filterMode);
-  if (searchQuery) filteredTransactions = filteredTransactions.filter(e => 
-    cT(e.category).toLowerCase().includes(searchQuery.toLowerCase()) || 
-    (e.details && e.details.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  if (searchQuery) filteredTransactions = filteredTransactions.filter(e => cT(e.category).toLowerCase().includes(searchQuery.toLowerCase()) || (e.details && e.details.toLowerCase().includes(searchQuery.toLowerCase())));
 
-  const headerTotal = contextTransactions.reduce((acc, curr) => acc + curr.amount, 0);
   const displayTotal = filteredTransactions.reduce((acc, curr) => acc + curr.amount, 0);
-  const globalPendingTotal = transactions.filter(e => e.tripId === activeTripId && e.type === 'pending').reduce((acc, curr) => acc + curr.amount, 0);
+  
+  // 🚀 MAGIC HAPPENS HERE: Reading from Cloud Summary instead of Local Array
+  let headerTotal = 0;
+  if (currentViewType === 'monthly' || (txnType === 'pending' && pendingFilter !== 'STILL_PENDING')) {
+     headerTotal = contextTransactions.reduce((acc, curr) => acc + curr.amount, 0);
+  } else {
+     headerTotal = activeSummary[txnType] || 0;
+  }
+  const globalPendingTotal = activeSummary['pending'] || 0;
 
-  // --- FORM HANDLERS ---
+  // --- FORM HANDLERS (WITH TRACKER INTEGRATION) ---
   const handleTripChange = async (e) => {
     if (e.target.value === 'ADD_NEW_TRIP') {
       const name = prompt(lang === 'ta' ? "புதிய கணக்கின் பெயரை உள்ளிடவும்:" : "Enter name for new ledger:");
@@ -324,23 +295,21 @@ export default function App() {
 
     if (isCustomCat) {
       const existing = customCategories.find(c => c.name.toLowerCase() === finalCat.toLowerCase() && c.type === txnType && c.tripId === activeTripId);
-      if (!existing) {
-        await addDoc(collection(db, `users/${user.uid}/categories`), { name: finalCat, type: txnType, tripId: activeTripId });
-      }
+      if (!existing) await addDoc(collection(db, `users/${user.uid}/categories`), { name: finalCat, type: txnType, tripId: activeTripId });
     }
 
-    const payload = {
-      tripId: activeTripId, type: txnType, category: finalCat,
-      details, amount: parseFloat(amount), date, paymentMode: mode, isRecurring
-    };
+    const payload = { tripId: activeTripId, type: txnType, category: finalCat, details, amount: parseFloat(amount), date, paymentMode: mode, isRecurring };
 
     if (editingId) {
+      const oldTxn = transactions.find(t => t.id === editingId);
+      if (oldTxn) await updateSummary(oldTxn.tripId, oldTxn.type, -oldTxn.amount);
       await updateDoc(doc(db, `users/${user.uid}/transactions`, editingId), payload);
+      await updateSummary(activeTripId, txnType, parseFloat(amount));
       cancelEdit();
     } else {
       await addDoc(collection(db, `users/${user.uid}/transactions`), payload);
-      setAmount(''); setDetails('');
-      setIsCustomCat(false); setCustomCatInput(''); setCategory(finalCat);
+      await updateSummary(activeTripId, txnType, parseFloat(amount));
+      setAmount(''); setDetails(''); setIsCustomCat(false); setCustomCatInput(''); setCategory(finalCat);
     }
   };
 
@@ -351,14 +320,13 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const cancelEdit = () => {
-    setEditingId(null); setAmount(''); setDetails(''); setDate(new Date().toISOString().split('T')[0]);
-    setIsCustomCat(false); setCustomCatInput('');
-  };
+  const cancelEdit = () => { setEditingId(null); setAmount(''); setDetails(''); setDate(new Date().toISOString().split('T')[0]); setIsCustomCat(false); setCustomCatInput(''); };
 
   const handleDelete = async (id) => {
     if (confirm("Delete this transaction?")) {
+      const txn = transactions.find(t => t.id === id);
       await deleteDoc(doc(db, `users/${user.uid}/transactions`, id));
+      if (txn) await updateSummary(txn.tripId, txn.type, -txn.amount);
       if (editingId === id) cancelEdit();
     }
   };
@@ -370,19 +338,15 @@ export default function App() {
     }
   };
 
-  // --- ADVANCED ACTIONS ---
+  // --- ADVANCED ACTIONS (WITH TRACKER INTEGRATION) ---
   const markAsPaid = async (txn) => {
     const todayStr = new Date().toISOString().split('T')[0];
     const historyNote = `${t('txtOriginalDate')}${formatCustomDate(txn.date, lang)})`;
-    
     await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), {
-      type: 'income',
-      isRecovered: true,
-      originalDate: txn.date, 
-      date: todayStr,
-      details: txn.details ? `${txn.details} ${historyNote}` : historyNote
+      type: 'income', isRecovered: true, originalDate: txn.date, date: todayStr, details: txn.details ? `${txn.details} ${historyNote}` : historyNote
     });
-    
+    await updateSummary(txn.tripId, 'pending', -txn.amount);
+    await updateSummary(txn.tripId, 'income', txn.amount);
     setTxnType('income');
   };
 
@@ -390,20 +354,12 @@ export default function App() {
     const oldDate = txn.originalDate || txn.date;
     const historyNote = `${t('txtOriginalDate')}${formatCustomDate(oldDate, lang)})`;
     let cleanDetails = txn.details || '';
+    if (cleanDetails.includes(historyNote)) cleanDetails = cleanDetails.replace(historyNote, '').trim();
     
-    if (cleanDetails.includes(historyNote)) {
-       cleanDetails = cleanDetails.replace(historyNote, '').trim();
-    }
-    
-    await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), {
-      type: 'pending',
-      isRecovered: false,
-      date: oldDate,
-      details: cleanDetails
-    });
-    
-    setTxnType('pending');
-    setPendingFilter('STILL_PENDING');
+    await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), { type: 'pending', isRecovered: false, date: oldDate, details: cleanDetails });
+    await updateSummary(txn.tripId, 'income', -txn.amount);
+    await updateSummary(txn.tripId, 'pending', txn.amount);
+    setTxnType('pending'); setPendingFilter('STILL_PENDING');
   };
 
   const payPlanned = async (txn) => {
@@ -412,17 +368,13 @@ export default function App() {
     const historyNote = `${t('txtOriginalDate')}${formatCustomDate(txn.date, lang)})`;
 
     if (txn.isRecurring) {
-      await addDoc(collection(db, `users/${user.uid}/transactions`), {
-        ...txn, type: 'expense', date: todayStr, isRecurring: false, 
-        details: txn.details ? `${txn.details} ${historyNote}` : historyNote
-      });
-      await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), {
-        date: calculateNextMonthDate(txn.date)
-      });
+      await addDoc(collection(db, `users/${user.uid}/transactions`), { ...txn, type: 'expense', date: todayStr, isRecurring: false, details: txn.details ? `${txn.details} ${historyNote}` : historyNote });
+      await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), { date: calculateNextMonthDate(txn.date) });
+      await updateSummary(txn.tripId, 'expense', txn.amount);
     } else {
-      await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), {
-        type: 'expense', date: todayStr, details: txn.details ? `${txn.details} ${historyNote}` : historyNote
-      });
+      await updateDoc(doc(db, `users/${user.uid}/transactions`, txn.id), { type: 'expense', date: todayStr, details: txn.details ? `${txn.details} ${historyNote}` : historyNote });
+      await updateSummary(txn.tripId, 'planned', -txn.amount);
+      await updateSummary(txn.tripId, 'expense', txn.amount);
     }
     setTxnType('expense');
   };
@@ -444,11 +396,7 @@ export default function App() {
   const baseCategoryType = (txnType === 'expense' || txnType === 'planned') ? 'expense' : 'income';
   const activeOptions = baseCategoryType === 'expense' ? expenseCategories : incomeCategories;
   
-  const activeCustomCats = customCategories.filter(c => 
-    (c.type === txnType || (!c.tripId && c.type === baseCategoryType)) && 
-    (c.tripId === activeTripId || !c.tripId)
-  );
-  
+  const activeCustomCats = customCategories.filter(c => (c.type === txnType || (!c.tripId && c.type === baseCategoryType)) && (c.tripId === activeTripId || !c.tripId));
   const selectedCustomCatData = activeCustomCats.find(c => c.name === category);
   const isGhostCategory = editingId && category && !activeOptions.includes(category) && !activeCustomCats.find(c => c.name === category);
 
@@ -484,15 +432,7 @@ export default function App() {
     );
   }
   
-  if (isLocked) {
-    return (
-      <PinScreen 
-        userId={user.uid}
-        onUnlock={() => setIsLocked(false)} 
-        onReset={handleForgotPin}
-      />
-    );
-  }
+  if (isLocked) { return <PinScreen userId={user.uid} onUnlock={() => setIsLocked(false)} onReset={handleForgotPin} />; }
 
   return (
     <>
@@ -553,7 +493,6 @@ export default function App() {
         <div className="action-bar">
           <div className="action-circle-btn dark" onClick={() => {setCurrentViewType('all'); setFilterMonth('');}} title="All-Time">📜</div>
           <div className="action-circle-btn dark" onClick={copyToWhatsApp} title="Copy to WhatsApp">📋</div>
-          {/* MASTER PDF EXPORT BUTTON */}
           <div className="action-circle-btn dark" onClick={downloadMasterPDF} title="Download Master Archive PDF" style={{color: '#00e5ff'}}>📥</div>
           <div className="action-circle-btn dark" onClick={() => setLang(lang==='en'?'ta':'en')} style={{color:'#ed5e21'}}>அ/A</div>
           <div className="action-circle-btn dark" onClick={logOut} style={{color:'var(--expense)'}}><LogOut size={18}/></div>
@@ -581,18 +520,12 @@ export default function App() {
                 <select value={category} onChange={(e) => { if(e.target.value === 'ADD_NEW_CUSTOM_CAT') setIsCustomCat(true); else setCategory(e.target.value); }}>
                   <option value="" disabled hidden>Select...</option>
                   {activeOptions.map(cat => <option key={cat} value={cat}>{cT(cat)}</option>)}
-                  {activeCustomCats.length > 0 && (
-                    <optgroup label="Custom Categories">
-                      {activeCustomCats.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}
-                    </optgroup>
-                  )}
+                  {activeCustomCats.length > 0 && <optgroup label="Custom Categories">{activeCustomCats.map(cat => <option key={cat.id} value={cat.name}>{cat.name}</option>)}</optgroup>}
                   {isGhostCategory && <option value={category} style={{fontStyle: 'italic'}}>{category} (Deleted)</option>}
                   <option value="ADD_NEW_CUSTOM_CAT">➕ {lang === 'ta' ? "தனிப்பயன் சேர்..." : "Add Custom..."}</option>
                 </select>
                 {selectedCustomCatData && (
-                  <div style={{fontSize: '10px', color: 'var(--expense)', marginTop: '6px', cursor: 'pointer', textAlign: 'right'}} onClick={() => handleDeleteCustomCategory(selectedCustomCatData.id, selectedCustomCatData.name)}>
-                    🗑️ Delete Category
-                  </div>
+                  <div style={{fontSize: '10px', color: 'var(--expense)', marginTop: '6px', cursor: 'pointer', textAlign: 'right'}} onClick={() => handleDeleteCustomCategory(selectedCustomCatData.id, selectedCustomCatData.name)}>🗑️ Delete Category</div>
                 )}
               </>
             ) : (
@@ -695,7 +628,6 @@ export default function App() {
              const rClass = isRecov ? 'green-glow' : isInc ? 'green-glow' : isPend ? 'yellow-glow' : isPlan ? 'cyan-glow' : 'red-glow';
              const cColor = isRecov ? 'color-green' : isInc ? 'color-green' : isPend ? 'color-yellow' : isPlan ? 'color-cyan' : 'color-red';
              const sign = isRecov ? '✅ ' : isInc ? '+' : isPend ? '⏳ ' : isPlan ? '🗓️ ' : '-';
-             
              const dynamicStyle = isRecov ? { background: 'linear-gradient(90deg, rgba(0, 211, 98, 0.08) 0%, #111 100%)', border: '1px solid rgba(0,211,98,0.2)' } : {};
 
              return (
@@ -703,19 +635,9 @@ export default function App() {
                  <div className="txn-left" onClick={() => setActiveModalTxn(entry)} style={{ overflow: 'hidden', flex: 1 }}>
                    <div className="txn-icon">{categoryIcons[entry.category] || "🔹"}</div>
                    <div className="txn-details" style={{ width: '100%' }}>
-                     <div className="txn-name">
-                       {cT(entry.category)}
-                       {entry.isRecurring && <span className="txn-subtext" style={{color:'var(--planned)'}}>🔄</span>}
-                     </div>
-                     {entry.details && (
-                       <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                         {entry.details}
-                       </div>
-                     )}
-                     <div className="txn-time">
-                       {formatCustomDate(entry.date, lang)}
-                       {isRecov && <span style={{color: 'var(--income)', fontWeight: 'bold', marginLeft: '6px'}}>✅ Recovered</span>}
-                     </div>
+                     <div className="txn-name">{cT(entry.category)} {entry.isRecurring && <span className="txn-subtext" style={{color:'var(--planned)'}}>🔄</span>}</div>
+                     {entry.details && <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.6)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{entry.details}</div>}
+                     <div className="txn-time">{formatCustomDate(entry.date, lang)} {isRecov && <span style={{color: 'var(--income)', fontWeight: 'bold', marginLeft: '6px'}}>✅ Recovered</span>}</div>
                    </div>
                  </div>
                  <div className="txn-right">
