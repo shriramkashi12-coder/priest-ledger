@@ -3,6 +3,7 @@ import { auth, db, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { LogOut } from 'lucide-react';
+import PinScreen from './PinScreen';
 
 // --- PDF IMPORTS ---
 import jsPDF from 'jspdf';
@@ -100,6 +101,18 @@ export default function App() {
 
   // Modal State
   const [activeModalTxn, setActiveModalTxn] = useState(null);
+
+  // --- PIN SYSTEM STATE (ADD 2) ---
+  const [isLocked, setIsLocked] = useState(true);
+
+  const handleForgotPin = async () => {
+    if (user && user.uid) {
+      localStorage.removeItem(`appPin_${user.uid}`);
+    }
+    setIsLocked(true);
+    await logOut(); 
+  };
+  // --------------------------------
 
   const t = (key) => dict[lang][key];
   const cT = (name) => (lang === 'ta' && catTranslate[name]) ? catTranslate[name] : name;
@@ -449,6 +462,17 @@ export default function App() {
       </div>
     );
   }
+  // 👇 PASTE THIS NEW CHUNK RIGHT HERE 👇
+  if (isLocked) {
+    return (
+      <PinScreen 
+        userId={user.uid}
+        onUnlock={() => setIsLocked(false)} 
+        onReset={handleForgotPin}
+      />
+    );
+  }
+  // 👆 END OF NEW CHUNK 👆
 
   return (
     <>
