@@ -102,17 +102,38 @@ export default function App() {
   // Modal State
   const [activeModalTxn, setActiveModalTxn] = useState(null);
 
-  // --- PIN SYSTEM STATE (ADD 2) ---
+  // --- PIN SYSTEM STATE ---
   const [isLocked, setIsLocked] = useState(true);
 
   const handleForgotPin = async () => {
-    if (user && user.uid) {
-      localStorage.removeItem(`appPin_${user.uid}`);
+    if (navigator.onLine) {
+      if (user && user.uid) {
+        localStorage.removeItem(`appPin_${user.uid}`);
+      }
+      setIsLocked(true);
+      await logOut(); 
+    } else {
+      alert("You must be connected to the internet to reset your PIN.");
     }
-    setIsLocked(true);
-    await logOut(); 
   };
   // --------------------------------
+
+  // --- NETWORK STATE ---
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOffline = () => setIsOffline(true);
+    const handleOnline = () => setIsOffline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+  // ---------------------
 
   const t = (key) => dict[lang][key];
   const cT = (name) => (lang === 'ta' && catTranslate[name]) ? catTranslate[name] : name;
@@ -462,7 +483,7 @@ export default function App() {
       </div>
     );
   }
-  // 👇 PASTE THIS NEW CHUNK RIGHT HERE 👇
+  
   if (isLocked) {
     return (
       <PinScreen 
@@ -472,7 +493,6 @@ export default function App() {
       />
     );
   }
-  // 👆 END OF NEW CHUNK 👆
 
   return (
     <>
@@ -503,6 +523,12 @@ export default function App() {
       {showYearEndWarning && (
         <div style={{ background: 'var(--pending)', color: '#000', padding: '10px 15px', textAlign: 'center', fontSize: '13px', fontWeight: 'bold' }}>
           ⚠️ Year-End Reminder: Export your Master Archive to save {new Date().getFullYear()}'s records.
+        </div>
+      )}
+
+      {isOffline && (
+        <div style={{ background: '#ff3b30', color: 'white', textAlign: 'center', padding: '4px', fontSize: '12px', fontWeight: 'bold' }}>
+          ⚠️ You are offline. Viewing saved data.
         </div>
       )}
 
