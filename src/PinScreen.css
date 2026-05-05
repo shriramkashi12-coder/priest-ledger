@@ -1,0 +1,116 @@
+.pin-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: #121212;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.pin-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.pin-header h2 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.pin-header p {
+  color: #a0a0a0;
+  font-size: 14px;
+}
+
+.pin-display {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 40px;
+  height: 20px;
+}
+
+.pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #333;
+  transition: all 0.2s ease;
+}
+
+.pin-dot.filled {
+  background-color: #ffffff;
+  border-color: #ffffff;
+}
+
+.number-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  max-width: 300px;
+}
+
+.pad-btn {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: none;
+  background-color: #2a2a2a;
+  color: white;
+  font-size: 24px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.1s;
+}
+
+.pad-btn:active {
+  background-color: #444;
+}
+
+.pad-btn.empty {
+  background-color: transparent;
+  cursor: default;
+}
+
+.pad-btn.delete {
+  background-color: transparent;
+  font-size: 20px;
+}
+
+.error-text {
+  color: #ff4a4a;
+  margin-bottom: 20px;
+  margin-top: -20px;
+  font-size: 14px;
+}
+
+.error-shake {
+  animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+}
+
+@keyframes shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0); }
+  20%, 80% { transform: translate3d(2px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+  40%, 60% { transform: translate3d(4px, 0, 0); }
+}
+
+.forgot-pin-btn {
+  margin-top: 40px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.forgot-pin-btn:hover {
+  color: #fff;
+}
