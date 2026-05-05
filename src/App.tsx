@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db, logInWithGoogle, logOut } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, increment, query, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, increment, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { LogOut } from 'lucide-react';
 import PinScreen from './PinScreen';
 
@@ -197,15 +197,19 @@ export default function App() {
     await setDoc(summaryRef, { [type]: increment(amountChange) }, { merge: true });
   };
 
-  // --- MASTER ARCHIVE EXPORT ---
-  const downloadMasterPDF = () => {
-    if (!transactions.length) return alert(t('txtNoRecords'));
-    const doc = new jsPDF();
+  // --- MASTER ARCHIVE EXPORT (PAGINATION SAFE) ---
+  const downloadMasterPDF = async () => {
+    // 1. Fetch the complete history directly from Firebase, bypassing the 100-item limit
+    const querySnapshot = await getDocs(collection(db, `users/${user.uid}/transactions`));
+    const allTxns = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+    if (!allTxns.length) return alert(t('txtNoRecords'));
+    const docFile = new jsPDF();
     const currentYear = new Date().getFullYear();
     let currentY = 35;
 
-    doc.setFontSize(22); doc.setTextColor(40, 40, 40); doc.text(`Complete Ledger Archive - ${currentYear}`, 14, 22);
-    doc.setFontSize(11); doc.setTextColor(100, 100, 100); doc.text(`Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}`, 14, 28);
+    docFile.setFontSize(22); docFile.setTextColor(40, 40, 40); docFile.text(`Complete Ledger Archive - ${currentYear}`, 14, 22);
+    docFile.setFontSize(11); docFile.setTextColor(100, 100, 100); docFile.text(`Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}`, 14, 28);
 
     const sections = [
       { id: 'income', title: 'Direct Income', filter: t => t.type === 'income' && !t.isRecovered, color: [46, 204, 113] },
@@ -216,11 +220,12 @@ export default function App() {
     ];
 
     trips.forEach((trip) => {
-      const tripTxns = transactions.filter(t => t.tripId === trip.id);
+      // Use allTxns instead of the local 'transactions' state!
+      const tripTxns = allTxns.filter(t => t.tripId === trip.id);
       if (tripTxns.length === 0) return; 
 
-      if (currentY > 250) { doc.addPage(); currentY = 20; }
-      doc.setFontSize(16); doc.setTextColor(237, 94, 33); doc.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
+      if (currentY > 250) { docFile.addPage(); currentY = 20; }
+      docFile.setFontSize(16); docFile.setTextColor(237, 94, 33); docFile.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
 
       sections.forEach(sec => {
         const sectionTxns = tripTxns.filter(sec.filter).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -229,17 +234,17 @@ export default function App() {
         const sectionTotal = sectionTxns.reduce((acc, curr) => acc + curr.amount, 0);
         const tableRows = sectionTxns.map(txn => [ formatCustomDate(txn.date, 'en'), txn.category, txn.paymentMode, txn.details || '-', `Rs. ${txn.amount.toLocaleString('en-IN')}` ]);
 
-        autoTable(doc, {
+        autoTable(docFile, {
           startY: currentY, head: [[`${sec.title}`, 'Category', 'Mode', 'Details', 'Amount']], body: tableRows,
           foot: [['', '', '', 'Total:', `Rs. ${sectionTotal.toLocaleString('en-IN')}`]], theme: 'grid',
           headStyles: { fillColor: sec.color, textColor: [255,255,255] }, footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
           styles: { fontSize: 9, cellPadding: 3 }, columnStyles: { 0: { cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } }
         });
-        currentY = doc.lastAutoTable.finalY + 12;
+        currentY = docFile.lastAutoTable.finalY + 12;
       });
-      currentY += 5; doc.setDrawColor(200); doc.line(14, currentY, 196, currentY); currentY += 15;
+      currentY += 5; docFile.setDrawColor(200); docFile.line(14, currentY, 196, currentY); currentY += 15;
     });
-    doc.save(`Complete_Ledger_Archive_${currentYear}.pdf`);
+    docFile.save(`Complete_Ledger_Archive_${currentYear}.pdf`);
   };
 
   const todayDate = new Date();
