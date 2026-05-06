@@ -22,7 +22,8 @@ const dict = {
     txtNoRecords: "No matching records found.", txtSum: "Sum", txtAllTime: "All-Time Report", txtReport: "Report", 
     txtTotal: "Total", txtMonthly: "Monthly", txtPendingDuesBadge: "⏳ Pending Dues:", btnMarkPaid: "Mark Paid", 
     txtOriginalDate: "(Due: ", btnPayNow: "Pay Now", txtDaysLeft: "Days Left", txtDueToday: "Due Today", txtOverdue: "Overdue!",
-    titleLogin: "Priest Ledger", descLogin: "Sign in to sync your ledger securely to the cloud."
+    titleLogin: "Priest Ledger", descLogin: "Sign in to sync your ledger securely to the cloud.",
+    txtCopied: "Copied to clipboard!" // <--- ADD THIS HERE
   },
   ta: {
     lblIncome: "வருமானம்", lblExpense: "செலவு", lblPending: "நிலுவை", lblPlanned: "திட்டமிட்டவை", lblRecurring: "மாதாந்திரம்",
@@ -35,7 +36,8 @@ const dict = {
     txtNoRecords: "பதிவுகள் எதுவும் இல்லை.", txtSum: "மொத்தம்", txtAllTime: "முழு அறிக்கை", txtReport: "அறிக்கை", 
     txtTotal: "மொத்த", txtMonthly: "மாத", txtPendingDuesBadge: "⏳ நிலுவைத் தொகை:", btnMarkPaid: "பெறப்பட்டது", 
     txtOriginalDate: "(பழைய தேதி: ", btnPayNow: "செலுத்து", txtDaysLeft: "நாட்கள் மீதம்", txtDueToday: "இன்று தேதியாகும்", txtOverdue: "தாமதம்!",
-    titleLogin: "கணக்கு புத்தகம்", descLogin: "உங்கள் தரவை மேகக்கணியில் பாதுகாப்பாக சேமிக்க உள்நுழையவும்."
+    titleLogin: "கணக்கு புத்தகம்", descLogin: "உங்கள் தரவை மேகக்கணியில் பாதுகாப்பாக சேமிக்க உள்நுழையவும்.",
+    txtCopied: "நகலெடுக்கப்பட்டது!" // <--- ADD THIS HERE
   }
 };
 
@@ -402,7 +404,7 @@ export default function App() {
       txt += `• ${formatCustomDate(e.date, lang)} | *${cT(e.category)}* | ₹${e.amount.toLocaleString('en-IN')}${e.details?`\n  ↳ _${e.details}_`:''}\n`;
     });
     txt += `\n*TOTAL: ₹${total.toLocaleString('en-IN')}*`;
-    navigator.clipboard.writeText(txt).then(() => alert(t('txtCopied')));
+    navigator.clipboard.writeText(txt).then(() => alert('Copied to clipboard!')));
   };
 
   const activeColor = txnType === 'income' ? 'var(--income)' : txnType === 'expense' ? 'var(--expense)' : txnType === 'pending' ? 'var(--pending)' : 'var(--planned)';
