@@ -5,9 +5,7 @@ import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, incr
 import { LogOut } from 'lucide-react';
 import PinScreen from './PinScreen';
 
-// --- PDF IMPORTS ---
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+
 
 // --- DICTIONARIES & CATEGORIES ---
 const dict = {
@@ -199,81 +197,136 @@ export default function App() {
     await setDoc(summaryRef, { [type]: increment(amountChange) }, { merge: true });
   };
 
-  // --- MASTER ARCHIVE EXPORT (PAGINATION SAFE & TAMIL SUPPORT) ---
+  // --- MASTER ARCHIVE EXPORT (NATIVE HTML & FLAWLESS TAMIL SUPPORT) ---
   const downloadMasterPDF = async () => {
-    // 1. Fetch the complete history directly from Firebase, bypassing the 100-item limit
+    // 1. Fetch complete history bypassing local limits
     const querySnapshot = await getDocs(collection(db, `users/${user.uid}/transactions`));
     const allTxns = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
     if (!allTxns.length) return alert(t('txtNoRecords'));
-    const docFile = new jsPDF();
-
-    // === 2. UNIVERSAL TAMIL FONT INJECTION ===
-    try {
-      const fontUrl = "https://raw.githubusercontent.com/googlefonts/noto-fonts/main/unhinted/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf";
-      const response = await fetch(fontUrl);
-      const buffer = await response.arrayBuffer();
-      let binary = '';
-      const bytes = new Uint8Array(buffer);
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      docFile.addFileToVFS("TamilFont.ttf", window.btoa(binary));
-      docFile.addFont("TamilFont.ttf", "TamilFont", "normal", "Identity-H");
-      
-      // Force the whole document to use this font
-      docFile.setFont("TamilFont"); 
-    } catch (err) {
-      console.error("Font loading error:", err);
-      // Gracefully falls back to default English if the user is offline
-    }
-    // ==========================================
 
     const currentYear = new Date().getFullYear();
-    let currentY = 35;
 
-    docFile.setFontSize(22); docFile.setTextColor(40, 40, 40); docFile.text(`Complete Ledger Archive - ${currentYear}`, 14, 22);
-    docFile.setFontSize(11); docFile.setTextColor(100, 100, 100); docFile.text(`Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}`, 14, 28);
+    // 2. Open a new background window for the PDF
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return alert("Please allow pop-ups to generate the PDF.");
+
+    // 3. Build the HTML and CSS styling (Matches your old jsPDF colors)
+    let htmlContent = `
+      <!DOCTYPE html>
+      <html lang="${lang}">
+      <head>
+        <meta charset="UTF-8">
+        <title>Complete_Ledger_Archive_${currentYear}</title>
+        <style>
+          body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333; padding: 20px; }
+          h1 { color: #222; margin-bottom: 5px; font-size: 24px; }
+          p { color: #666; margin-top: 0; font-size: 14px; }
+          .trip-section { margin-bottom: 30px; page-break-inside: avoid; }
+          .trip-title { color: #ed5e21; border-bottom: 2px solid #eee; padding-bottom: 5px; margin-top: 30px; font-size: 20px;}
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+          th { color: white; padding: 8px; text-align: left; border: 1px solid #ccc; }
+          td { padding: 8px; border: 1px solid #ddd; }
+          .total-row td { font-weight: bold; background-color: #f0f0f0; border-top: 2px solid #aaa; }
+          .amount-col { text-align: right; width: 100px; }
+          
+          /* Table Header Colors */
+          .bg-income { background-color: #2ecc71; }
+          .bg-recovered { background-color: #27ae60; }
+          .bg-expense { background-color: #e74c3c; }
+          .bg-pending { background-color: #f1c40f; color: #000; }
+          .bg-planned { background-color: #00e5ff; color: #000; }
+
+          @media print {
+            @page { margin: 15mm; }
+            body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+        <h1>Complete Ledger Archive - ${currentYear}</h1>
+        <p>Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}</p>
+    `;
 
     const sections = [
-      { id: 'income', title: 'Direct Income', filter: t => t.type === 'income' && !t.isRecovered, color: [46, 204, 113] },
-      { id: 'recovered', title: 'Recovered Dues', filter: t => t.type === 'income' && t.isRecovered, color: [39, 174, 96] },
-      { id: 'expense', title: 'Expenses', filter: t => t.type === 'expense', color: [231, 76, 60] },
-      { id: 'pending', title: 'Pending Dues (Unpaid)', filter: t => t.type === 'pending', color: [241, 196, 15] },
-      { id: 'planned', title: 'Planned Expenses', filter: t => t.type === 'planned', color: [0, 229, 255] }
+      { id: 'income', title: 'Direct Income', filter: t => t.type === 'income' && !t.isRecovered, cssClass: 'bg-income' },
+      { id: 'recovered', title: 'Recovered Dues', filter: t => t.type === 'income' && t.isRecovered, cssClass: 'bg-recovered' },
+      { id: 'expense', title: 'Expenses', filter: t => t.type === 'expense', cssClass: 'bg-expense' },
+      { id: 'pending', title: 'Pending Dues (Unpaid)', filter: t => t.type === 'pending', cssClass: 'bg-pending' },
+      { id: 'planned', title: 'Planned Expenses', filter: t => t.type === 'planned', cssClass: 'bg-planned' }
     ];
 
+    // 4. Generate the Tables
     trips.forEach((trip) => {
       const tripTxns = allTxns.filter(t => t.tripId === trip.id);
-      if (tripTxns.length === 0) return; 
+      if (tripTxns.length === 0) return;
 
-      if (currentY > 250) { docFile.addPage(); currentY = 20; }
-      docFile.setFontSize(16); docFile.setTextColor(237, 94, 33); 
-      docFile.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
+      htmlContent += `<div class="trip-section">`;
+      htmlContent += `<h2 class="trip-title">Ledger: ${trip.name}</h2>`;
 
       sections.forEach(sec => {
         const sectionTxns = tripTxns.filter(sec.filter).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-        if (sectionTxns.length === 0) return; 
+        if (sectionTxns.length === 0) return;
 
         const sectionTotal = sectionTxns.reduce((acc, curr) => acc + curr.amount, 0);
-        const tableRows = sectionTxns.map(txn => [ formatCustomDate(txn.date, 'en'), txn.category, txn.paymentMode, txn.details || '-', `Rs. ${txn.amount.toLocaleString('en-IN')}` ]);
 
-        autoTable(docFile, {
-          startY: currentY, head: [[`${sec.title}`, 'Category', 'Mode', 'Details', 'Amount']], body: tableRows,
-          foot: [['', '', '', 'Total:', `Rs. ${sectionTotal.toLocaleString('en-IN')}`]], theme: 'grid',
-          headStyles: { fillColor: sec.color, textColor: [255,255,255] }, 
-          footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
-          
-          // === 3. Tell AutoTable to use our new Tamil Font! ===
-          styles: { font: 'TamilFont', fontSize: 9, cellPadding: 3 }, 
-          
-          columnStyles: { 0: { cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } }
+        htmlContent += `
+          <table>
+            <thead>
+              <tr>
+                <th class="${sec.cssClass}">${sec.title}</th>
+                <th class="${sec.cssClass}">Category</th>
+                <th class="${sec.cssClass}">Mode</th>
+                <th class="${sec.cssClass}">Details</th>
+                <th class="${sec.cssClass} amount-col">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+
+        sectionTxns.forEach(txn => {
+          htmlContent += `
+            <tr>
+              <td>${formatCustomDate(txn.date, 'en')}</td>
+              <td>${txn.category}</td>
+              <td>${txn.paymentMode}</td>
+              <td>${txn.details || '-'}</td>
+              <td class="amount-col">Rs. ${txn.amount.toLocaleString('en-IN')}</td>
+            </tr>
+          `;
         });
-        currentY = docFile.lastAutoTable.finalY + 12;
+
+        htmlContent += `
+              <tr class="total-row">
+                <td colspan="4" style="text-align: right;">Total:</td>
+                <td class="amount-col">Rs. ${sectionTotal.toLocaleString('en-IN')}</td>
+              </tr>
+            </tbody>
+          </table>
+        `;
       });
-      currentY += 5; docFile.setDrawColor(200); docFile.line(14, currentY, 196, currentY); currentY += 15;
+
+      htmlContent += `</div>`;
     });
-    docFile.save(`Complete_Ledger_Archive_${currentYear}.pdf`);
+
+    // 5. Tell browser to auto-print, then close the tab
+    htmlContent += `
+      </body>
+      <script>
+        window.onload = function() {
+          setTimeout(function() {
+            window.print();
+            window.close(); 
+          }, 300);
+        };
+      </script>
+      </html>
+    `;
+
+    // 6. Push the HTML into the new window
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
   };
   const todayDate = new Date();
   const currentMonth = todayDate.getMonth();
