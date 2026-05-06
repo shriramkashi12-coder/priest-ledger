@@ -219,7 +219,7 @@ export default function App() {
         binary += String.fromCharCode(bytes[i]);
       }
       docFile.addFileToVFS("TamilFont.ttf", window.btoa(binary));
-      docFile.addFont("TamilFont.ttf", "TamilFont", "normal");
+      docFile.addFont("TamilFont.ttf", "TamilFont", "normal", "Identity-H");
       
       // Force the whole document to use this font
       docFile.setFont("TamilFont"); 
