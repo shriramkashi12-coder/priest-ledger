@@ -404,7 +404,7 @@ export default function App() {
       txt += `• ${formatCustomDate(e.date, lang)} | *${cT(e.category)}* | ₹${e.amount.toLocaleString('en-IN')}${e.details?`\n  ↳ _${e.details}_`:''}\n`;
     });
     txt += `\n*TOTAL: ₹${total.toLocaleString('en-IN')}*`;
-    navigator.clipboard.writeText(txt).then(() => alert('Copied to clipboard!')));
+    navigator.clipboard.writeText(txt).then(() => alert('Copied to clipboard!'));
   };
 
   const activeColor = txnType === 'income' ? 'var(--income)' : txnType === 'expense' ? 'var(--expense)' : txnType === 'pending' ? 'var(--pending)' : 'var(--planned)';
