@@ -199,7 +199,7 @@ export default function App() {
     await setDoc(summaryRef, { [type]: increment(amountChange) }, { merge: true });
   };
 
-  // --- MASTER ARCHIVE EXPORT (PAGINATION SAFE) ---
+  // --- MASTER ARCHIVE EXPORT (PAGINATION SAFE & TAMIL SUPPORT) ---
   const downloadMasterPDF = async () => {
     // 1. Fetch the complete history directly from Firebase, bypassing the 100-item limit
     const querySnapshot = await getDocs(collection(db, `users/${user.uid}/transactions`));
@@ -207,6 +207,28 @@ export default function App() {
 
     if (!allTxns.length) return alert(t('txtNoRecords'));
     const docFile = new jsPDF();
+
+    // === 2. UNIVERSAL TAMIL FONT INJECTION ===
+    try {
+      const fontUrl = "https://raw.githubusercontent.com/googlefonts/noto-fonts/main/unhinted/ttf/NotoSansTamil/NotoSansTamil-Regular.ttf";
+      const response = await fetch(fontUrl);
+      const buffer = await response.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      docFile.addFileToVFS("TamilFont.ttf", window.btoa(binary));
+      docFile.addFont("TamilFont.ttf", "TamilFont", "normal");
+      
+      // Force the whole document to use this font
+      docFile.setFont("TamilFont"); 
+    } catch (err) {
+      console.error("Font loading error:", err);
+      // Gracefully falls back to default English if the user is offline
+    }
+    // ==========================================
+
     const currentYear = new Date().getFullYear();
     let currentY = 35;
 
@@ -222,12 +244,12 @@ export default function App() {
     ];
 
     trips.forEach((trip) => {
-      // Use allTxns instead of the local 'transactions' state!
       const tripTxns = allTxns.filter(t => t.tripId === trip.id);
       if (tripTxns.length === 0) return; 
 
       if (currentY > 250) { docFile.addPage(); currentY = 20; }
-      docFile.setFontSize(16); docFile.setTextColor(237, 94, 33); docFile.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
+      docFile.setFontSize(16); docFile.setTextColor(237, 94, 33); 
+      docFile.text(`Ledger: ${trip.name}`, 14, currentY); currentY += 10;
 
       sections.forEach(sec => {
         const sectionTxns = tripTxns.filter(sec.filter).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -239,8 +261,13 @@ export default function App() {
         autoTable(docFile, {
           startY: currentY, head: [[`${sec.title}`, 'Category', 'Mode', 'Details', 'Amount']], body: tableRows,
           foot: [['', '', '', 'Total:', `Rs. ${sectionTotal.toLocaleString('en-IN')}`]], theme: 'grid',
-          headStyles: { fillColor: sec.color, textColor: [255,255,255] }, footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
-          styles: { fontSize: 9, cellPadding: 3 }, columnStyles: { 0: { cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } }
+          headStyles: { fillColor: sec.color, textColor: [255,255,255] }, 
+          footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+          
+          // === 3. Tell AutoTable to use our new Tamil Font! ===
+          styles: { font: 'TamilFont', fontSize: 9, cellPadding: 3 }, 
+          
+          columnStyles: { 0: { cellWidth: 28 }, 4: { halign: 'right', fontStyle: 'bold', cellWidth: 35 } }
         });
         currentY = docFile.lastAutoTable.finalY + 12;
       });
@@ -248,7 +275,6 @@ export default function App() {
     });
     docFile.save(`Complete_Ledger_Archive_${currentYear}.pdf`);
   };
-
   const todayDate = new Date();
   const currentMonth = todayDate.getMonth();
   const currentDay = todayDate.getDate();
