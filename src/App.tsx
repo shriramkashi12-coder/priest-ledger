@@ -211,13 +211,23 @@ export default function App() {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return alert("Please allow pop-ups to generate the PDF.");
 
-    // 3. Build the HTML and CSS styling (Matches your old jsPDF colors)
+    // === PDF SPECIFIC TRANSLATIONS ===
+    const pdfTxt = {
+      title: lang === 'ta' ? 'முழு கணக்கு அறிக்கை' : 'Complete Ledger Archive',
+      generated: lang === 'ta' ? 'உருவாக்கப்பட்ட தேதி:' : 'Generated on:',
+      ledger: lang === 'ta' ? 'கணக்கு:' : 'Ledger:',
+      details: lang === 'ta' ? 'விவரங்கள்' : 'Details',
+      amount: lang === 'ta' ? 'தொகை' : 'Amount',
+      rs: lang === 'ta' ? 'ரூ. ' : 'Rs. '
+    };
+
+    // 3. Build the HTML and CSS styling
     let htmlContent = `
       <!DOCTYPE html>
       <html lang="${lang}">
       <head>
         <meta charset="UTF-8">
-        <title>Complete_Ledger_Archive_${currentYear}</title>
+        <title>${pdfTxt.title}_${currentYear}</title>
         <style>
           body { font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #333; padding: 20px; }
           h1 { color: #222; margin-bottom: 5px; font-size: 24px; }
@@ -244,16 +254,17 @@ export default function App() {
         </style>
       </head>
       <body>
-        <h1>Complete Ledger Archive - ${currentYear}</h1>
-        <p>Generated on: ${formatCustomDate(new Date().toISOString(), 'en')}</p>
+        <h1>${pdfTxt.title} - ${currentYear}</h1>
+        <p>${pdfTxt.generated} ${formatCustomDate(new Date().toISOString(), lang)}</p>
     `;
 
+    // Map section titles to your dictionary translations
     const sections = [
-      { id: 'income', title: 'Direct Income', filter: t => t.type === 'income' && !t.isRecovered, cssClass: 'bg-income' },
-      { id: 'recovered', title: 'Recovered Dues', filter: t => t.type === 'income' && t.isRecovered, cssClass: 'bg-recovered' },
-      { id: 'expense', title: 'Expenses', filter: t => t.type === 'expense', cssClass: 'bg-expense' },
-      { id: 'pending', title: 'Pending Dues (Unpaid)', filter: t => t.type === 'pending', cssClass: 'bg-pending' },
-      { id: 'planned', title: 'Planned Expenses', filter: t => t.type === 'planned', cssClass: 'bg-planned' }
+      { id: 'income', title: t('lblIncome'), filter: t => t.type === 'income' && !t.isRecovered, cssClass: 'bg-income' },
+      { id: 'recovered', title: t('optRecovered'), filter: t => t.type === 'income' && t.isRecovered, cssClass: 'bg-recovered' },
+      { id: 'expense', title: t('lblExpense'), filter: t => t.type === 'expense', cssClass: 'bg-expense' },
+      { id: 'pending', title: t('lblPending'), filter: t => t.type === 'pending', cssClass: 'bg-pending' },
+      { id: 'planned', title: t('lblPlanned'), filter: t => t.type === 'planned', cssClass: 'bg-planned' }
     ];
 
     // 4. Generate the Tables
@@ -262,7 +273,7 @@ export default function App() {
       if (tripTxns.length === 0) return;
 
       htmlContent += `<div class="trip-section">`;
-      htmlContent += `<h2 class="trip-title">Ledger: ${trip.name}</h2>`;
+      htmlContent += `<h2 class="trip-title">${pdfTxt.ledger} ${trip.name}</h2>`;
 
       sections.forEach(sec => {
         const sectionTxns = tripTxns.filter(sec.filter).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -270,36 +281,39 @@ export default function App() {
 
         const sectionTotal = sectionTxns.reduce((acc, curr) => acc + curr.amount, 0);
 
+        // Apply translations to Table Headers
         htmlContent += `
           <table>
             <thead>
               <tr>
                 <th class="${sec.cssClass}">${sec.title}</th>
-                <th class="${sec.cssClass}">Category</th>
-                <th class="${sec.cssClass}">Mode</th>
-                <th class="${sec.cssClass}">Details</th>
-                <th class="${sec.cssClass} amount-col">Amount</th>
+                <th class="${sec.cssClass}">${t('lblCategory')}</th>
+                <th class="${sec.cssClass}">${t('lblMode')}</th>
+                <th class="${sec.cssClass}">${pdfTxt.details}</th>
+                <th class="${sec.cssClass} amount-col">${pdfTxt.amount}</th>
               </tr>
             </thead>
             <tbody>
         `;
 
         sectionTxns.forEach(txn => {
+          // Wrap txn.category in cT() and pass 'lang' to formatCustomDate
           htmlContent += `
             <tr>
-              <td>${formatCustomDate(txn.date, 'en')}</td>
-              <td>${txn.category}</td>
+              <td>${formatCustomDate(txn.date, lang)}</td>
+              <td>${cT(txn.category)}</td>
               <td>${txn.paymentMode}</td>
               <td>${txn.details || '-'}</td>
-              <td class="amount-col">Rs. ${txn.amount.toLocaleString('en-IN')}</td>
+              <td class="amount-col">${pdfTxt.rs}${txn.amount.toLocaleString('en-IN')}</td>
             </tr>
           `;
         });
 
+        // Apply translations to the Total row
         htmlContent += `
               <tr class="total-row">
-                <td colspan="4" style="text-align: right;">Total:</td>
-                <td class="amount-col">Rs. ${sectionTotal.toLocaleString('en-IN')}</td>
+                <td colspan="4" style="text-align: right;">${t('txtTotal')}:</td>
+                <td class="amount-col">${pdfTxt.rs}${sectionTotal.toLocaleString('en-IN')}</td>
               </tr>
             </tbody>
           </table>
